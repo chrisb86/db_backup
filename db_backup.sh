@@ -27,7 +27,7 @@
 
 name=$(basename -- $0)
 
-usage="Usage: ${name} sql|psql [ -d DEST_DIR ] [ -k KEEP_DAYS ] [ -l LABEL ]"
+usage="Usage: ${name} sql|psql|redis [ -d DEST_DIR ] [ -k KEEP_DAYS ] [ -l LABEL ] [ - r REDIS_CONF_DIR ]"
 
 # Show help screen
 # Usage: help exitcode
@@ -37,10 +37,11 @@ help () {
   echo "Dumps all databases on the local server to a directory and purge old backups"
   echo
   echo "${usage}"
-  echo "  sql|psql  Database type (mysql or postgresql)"
-  echo "  - d       Destination directory (default: ./)"
-  echo "  - k       Keep backups from n days (optional)"
-  echo "  - l       Label for backup files (default: hostname)"
+  echo "  sql|psql|redis  Database type (mysql or postgresql)"
+  echo "  - d             Destination directory (default: ./)"
+  echo "  - k             Keep backups from n days (optional)"
+  echo "  - l             Label for backup files (default: hostname)"
+  echo "  - r             Where to look for redis configuration files (default: /usr/locl/etc)"
   exit $1
 }
 
@@ -48,12 +49,36 @@ help () {
 # Usage: exerr errormessage
 exerr () { echo -e "$*" >&2 ; exit 1; }
 
-# Run backup
+# Run backup for (p)sql databases
 # Usage: backup
 backup () {
   for d in $databases; do
     timestamp=$(date +"%Y-%m-%d-%H%M%S")
     ${db_dump} ${db_dump_opts} ${d} | gzip -c > ${dest_dir}/${timestamp}_${label}_${d}.${suffix}.gz
+  done
+}
+
+# Run backup for redis databases
+# Usage: backup-redis
+backup-redis () {
+  for f in $redis_profiles; do
+
+      redis_socket=$(cat ${f} | grep "unixsocket " | cut -d ' ' -f2)
+      redis_password=$(cat ${f} | grep "requirepass " | cut -d ' ' -f2)
+      redis_dir=$(cat ${f} | grep "dir " | cut -d ' ' -f2)
+      redis_dumpfile=$(cat ${f} | grep "dbfilename " | cut -d ' ' -f2)
+
+      timestamp=$(date +"%Y-%m-%d-%H%M%S")
+
+      redis_timestamp_start=$(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE)
+
+      redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning BGSAVE
+      
+      while [ $(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE) -lt ${redis_timestamp_start} ]
+      do
+        sleep 1
+      done
+      gzip -c ${redis_dir}/${redis_dumpfile} > ${dest_dir}/${timestamp}_${label}_${redis_dumpfile}.gz
   done
 }
 
@@ -83,15 +108,21 @@ case "$1" in
     ignore_list="mysql|information_schema|performance_schema|sys|test|log"
     databases=$(mysql -Bse 'show databases;' | grep -Evw ${ignore_list})
   ;;
+  redis)
+    redis_conf_dir="/usr/local/etc"
+    redis_profiles=$(find ${redis_conf_dir}/redis-*.conf)
+    backup_redis=true
+  ;;
   *)
     help 1
   ;;
 esac
 
-shift; while getopts d:k:l: arg; do case ${arg} in
+shift; while getopts d:k:l:r: arg; do case ${arg} in
   d) DEST_DIR=${OPTARG};;
   k) keep=${OPTARG};;
   l) LABEL=${OPTARG};;
+  r) LABEL=${OPTARG};;
   ?) exerr ${usage};;
   :) exerr ${usage};;
 esac; done; shift $(( ${OPTIND} - 1 ))
@@ -99,7 +130,11 @@ esac; done; shift $(( ${OPTIND} - 1 ))
 dest_dir="${DEST_DIR:-./}"
 label="${LABEL:-$(hostname)}"
 
-backup
+if [ -n "${backup_redis}" ]; then
+  backup-redis
+else
+  backup
+fi
 
 if [ -n "${keep+set}" ]; then
   cleanup

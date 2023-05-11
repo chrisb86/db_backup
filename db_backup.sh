@@ -61,6 +61,8 @@ backup () {
 # Run backup for redis databases
 # Usage: backup-redis
 backup-redis () {
+  redis_profiles=$(find ${redis_conf_dir}/redis-*.conf)
+
   for f in $redis_profiles; do
 
       redis_socket=$(cat ${f} | grep "unixsocket " | cut -d ' ' -f2)
@@ -109,8 +111,6 @@ case "$1" in
     databases=$(mysql -Bse 'show databases;' | grep -Evw ${ignore_list})
   ;;
   redis)
-    redis_conf_dir="/usr/local/etc"
-    redis_profiles=$(find ${redis_conf_dir}/redis-*.conf)
     backup_redis=true
   ;;
   *)
@@ -122,13 +122,14 @@ shift; while getopts d:k:l:r: arg; do case ${arg} in
   d) DEST_DIR=${OPTARG};;
   k) keep=${OPTARG};;
   l) LABEL=${OPTARG};;
-  r) LABEL=${OPTARG};;
+  r) REDIS=${OPTARG};;
   ?) exerr ${usage};;
   :) exerr ${usage};;
 esac; done; shift $(( ${OPTIND} - 1 ))
 
 dest_dir="${DEST_DIR:-./}"
 label="${LABEL:-$(hostname)}"
+redis_conf_dir="${REDIS:-/usr/local/etc}"
 
 if [ -n "${backup_redis}" ]; then
   backup-redis

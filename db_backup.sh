@@ -74,7 +74,7 @@ backup-redis () {
 
       redis_timestamp_start=$(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE)
 
-      redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning BGSAVE
+      redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning BGSAVE >/dev/null 2>&1
       
       while [ $(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE) -lt ${redis_timestamp_start} ]
       do

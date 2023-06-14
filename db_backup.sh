@@ -55,40 +55,41 @@ backup () {
   for d in $databases; do
     timestamp=$(date +"%Y-%m-%d-%H%M%S")
     ${db_dump} ${db_dump_opts} ${d} | gzip -c > ${dest_dir}/${timestamp}_${label}_${d}.${suffix}.gz
+
+
+    # Purge files older than ${keep} days from destination directory
+    if [ -n "${keep+set}" ]; then
+      find ${dest_dir} -type f -name "*_${label}_${d}.${suffix}.gz" -mtime +${keep} -exec rm -r '{}' '+'
+    fi
   done
 }
 
 # Run backup for redis databases
 # Usage: backup-redis
 backup-redis () {
-  redis_profiles=$(find ${redis_conf_dir}/redis-*.conf)
-
-  for f in $redis_profiles; do
-
-      redis_socket=$(cat ${f} | grep "unixsocket " | cut -d ' ' -f2)
-      redis_password=$(cat ${f} | grep "requirepass " | cut -d ' ' -f2)
-      redis_dir=$(cat ${f} | grep "dir " | cut -d ' ' -f2)
-      redis_dumpfile=$(cat ${f} | grep "dbfilename " | cut -d ' ' -f2)
-
-      timestamp=$(date +"%Y-%m-%d-%H%M%S")
-
-      redis_timestamp_start=$(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE)
-
-      redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning BGSAVE >/dev/null 2>&1
-      
-      while [ $(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE) -lt ${redis_timestamp_start} ]
-      do
-        sleep 1
-      done
-      gzip -c ${redis_dir}/${redis_dumpfile} > ${dest_dir}/${timestamp}_${label}_${redis_dumpfile}.gz
-  done
-}
-
-# Purge files older than ${keep} days from destination directory
-# Usage: cleanup
-cleanup () {
   for d in $databases; do
-    find ${dest_dir} -type f -name "*_${label}_${d}.${suffix}.gz" -mtime +${keep} -exec rm -r '{}' '+'
+
+    redis_socket=$(cat ${d} | grep "unixsocket " | cut -d ' ' -f2)
+    redis_password=$(cat ${d} | grep "requirepass " | cut -d ' ' -f2)
+    redis_dir=$(cat ${d} | grep "dir " | cut -d ' ' -f2)
+    redis_dumpfile=$(cat ${d} | grep "dbfilename " | cut -d ' ' -f2)
+
+    timestamp=$(date +"%Y-%m-%d-%H%M%S")
+
+    redis_timestamp_start=$(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE)
+
+    redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning BGSAVE >/dev/null 2>&1
+    
+    while [ $(redis-cli -s ${redis_socket} -a ${redis_password} --no-auth-warning LASTSAVE) -lt ${redis_timestamp_start} ]
+    do
+      sleep 1
+    done
+    gzip -c ${redis_dir}/${redis_dumpfile} > ${dest_dir}/${timestamp}_${label}_${redis_dumpfile}.gz
+
+    # Purge files older than ${keep} days from destination directory
+    if [ -n "${keep+set}" ]; then
+      find ${dest_dir} -type f -name "*_${label}_${redis_dumpfile}.gz" -mtime +${keep} -exec rm -r '{}' '+'
+    fi
   done
 }
 
@@ -112,6 +113,8 @@ case "$1" in
   ;;
   redis)
     backup_redis=true
+    redis_conf_dir="${REDIS:-/usr/local/etc}"
+    databases=$(find ${redis_conf_dir}/redis-*.conf)
   ;;
   *)
     help 1
@@ -135,8 +138,4 @@ if [ -n "${backup_redis}" ]; then
   backup-redis
 else
   backup
-fi
-
-if [ -n "${keep+set}" ]; then
-  cleanup
 fi
